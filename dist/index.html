@@ -22,6 +22,8 @@
   input[type=file]{display:none}
   select,input[type=text]{width:100%;height:46px;border:1px solid #d4d4ce;border-radius:10px;padding:0 13px;font-size:15px;background:#fff}
   .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  #columnPicker[hidden]{display:none}
+  #columnPicker select{display:block;width:100%;margin-top:6px}
   .special-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
   .special{border:1px solid var(--line);border-radius:14px;padding:16px}
   label{display:block;font-size:12px;font-weight:700;margin:12px 0 7px}
@@ -75,6 +77,14 @@ button,input,select,textarea{font-family:inherit}input,select,textarea{color-sch
       <span class="hint">.xlsx / .xls · 브라우저에서만 읽고 원본은 수정하지 않습니다.</span>
     </label>
     <input id="file" type="file" accept=".xlsx,.xls">
+    <div id="columnPicker" class="grid" hidden style="margin-top:16px">
+      <label>주차 열<select id="colWeek"></select></label>
+      <label>품번 열<select id="colCode"></select></label>
+      <label>브랜드 열<select id="colBrand"></select></label>
+      <label>택가 열<select id="colTag"></select></label>
+      <label>하루특가 열<select id="colSale"></select></label>
+      <div class="hint">열을 바꾸면 상품 목록을 다시 읽습니다.</div>
+    </div>
   </section>
 
   <section class="card">
@@ -88,7 +98,7 @@ button,input,select,textarea{font-family:inherit}input,select,textarea{color-sch
     <div class="step">03 / SPECIAL</div>
     <div class="title">특가 3개 품번</div>
     <div class="special-grid" id="specialGrid"></div>
-    <div class="hint">선택한 주차의 「종합」 시트에서 가격을 찾습니다. 셋업은 두 품번의 택가·하루특가를 합산합니다. 할인율은 기존 JSX 기준으로 소수점 이하를 버립니다.</div>
+    <div class="hint">선택한 주차와 위에서 고른 「종합」 시트 열에서 가격을 찾습니다. 셋업은 두 품번의 택가·하루특가를 합산합니다. 할인율은 기존 JSX 기준으로 소수점 이하를 버립니다.</div>
   </section>
 
   <section class="card">
@@ -132,22 +142,21 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
 (function(root){
   const norm = value => String(value ?? '').trim().toUpperCase();
   const pct = (tag,sale) => Math.floor((tag-sale)*100/tag);
-  function parseRows(ws, XLSX){
+  function parseRows(ws, XLSX, columns={week:1,code:2,brand:3,tag:8,sale:13}){
     if(!ws || !ws['!ref']) throw new Error('「종합」 시트에 데이터가 없습니다.');
+    if(new Set(Object.values(columns)).size!==5) throw new Error('주차·품번·브랜드·택가·하루특가는 서로 다른 열을 선택해주세요.');
     // Keep physical Excel columns and row numbers even when !ref starts at B2.
     const range={s:{r:0,c:0},e:XLSX.utils.decode_range(ws['!ref']).e};
     const matrix=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,range});
     let week='', out=[];
-    const header=matrix.find(r=>r[2]==='품번' && r[8]==='택가' && r[13]==='하루특가');
-    if(!header) throw new Error('엑셀 열 형식이 다릅니다. 종합 시트의 C열 품번, I열 택가, N열 하루특가를 확인해주세요.');
     matrix.forEach((r,index)=>{
-      const label=String(r[1]??'').replace(/\s+/g,' ').trim();
+      const label=String(r[columns.week]??'').replace(/\s+/g,' ').trim();
       if(/\d+\s*월\s*\d+\s*주차/.test(label)) week=label;
-      const code=norm(r[2]);
+      const code=norm(r[columns.code]);
       if(!week || !code || code==='품번') return;
       const number=v=>v===null || String(v).trim()==='' ? NaN : Number(String(v).replace(/[,\s원]/g,''));
-      const tag=number(r[8]),sale=number(r[13]);
-      const brand=({S:'SHESMISS',T:'LIST',A:'SISTINA'})[norm(r[3])];
+      const tag=number(r[columns.tag]),sale=number(r[columns.sale]);
+      const brand=({S:'SHESMISS',T:'LIST',A:'SISTINA'})[norm(r[columns.brand])];
       let error='';
       if(!Number.isSafeInteger(tag)||!Number.isSafeInteger(sale)||tag<=0||sale<0||sale>tag) error='택가 또는 하루특가가 잘못되었거나 비어 있습니다';
       if(!brand) error='지원하지 않는 브랜드입니다';
@@ -206,7 +215,29 @@ const JSX_LOGIC = "function IDF_weekAll(){\n var S=stringIDToTypeID,C=charIDToTy
 const $=id=>document.getElementById(id);
 const money=n=>n.toLocaleString('ko-KR')+'원';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let rows=[],weeks=[],uploadId=0,currentData=null,sourceDate=new Date();
+let rows=[],weeks=[],sheet=null,uploadId=0,currentData=null,sourceDate=new Date();
+const columnFields=[['Week',1],['Code',2],['Brand',3],['Tag',8],['Sale',13]];
+function chosenColumns(){return Object.fromEntries(columnFields.map(([name])=>[name.toLowerCase(),Number($('col'+name).value)]));}
+function readColumns(){
+  const previous=$('week').value;rows=[];weeks=[];$('week').disabled=true;$('generate').disabled=true;
+  try{
+    rows=IDF.parseRows(sheet,XLSX,chosenColumns());weeks=[...new Set(rows.map(r=>r.week))];
+    $('week').innerHTML=weeks.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+    if(weeks.includes(previous))$('week').value=previous;
+    $('week').disabled=false;update();
+  }catch(e){$('week').innerHTML='<option value="">열을 다시 선택해주세요</option>';update();$('error').textContent=e.message||String(e);}
+}
+function showColumns(ws){
+  const end=Math.min(100,Math.max(13,XLSX.utils.decode_range(ws['!ref']).e.c));
+  const top=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,range:{s:{r:0,c:0},e:{r:Math.min(19,XLSX.utils.decode_range(ws['!ref']).e.r),c:end}}});
+  const options=Array.from({length:end+1},(_,c)=>{
+    const sample=top.map(row=>row[c]).find(v=>v!=null&&String(v).trim());
+    return `<option value="${c}">${XLSX.utils.encode_col(c)}${sample?' · '+esc(String(sample).slice(0,20)):''}</option>`;
+  }).join('');
+  for(const [name,defaultColumn] of columnFields){$('col'+name).innerHTML=options;$('col'+name).value=String(defaultColumn);}
+  $('columnPicker').hidden=false;
+}
+for(const [name] of columnFields)$('col'+name).addEventListener('change',readColumns);
 const grid=$('specialGrid');
 for(let i=1;i<=3;i++){
   const box=document.createElement('div');box.className='special';
@@ -235,7 +266,7 @@ function update(){
 }
 $('week').addEventListener('change',update);
 $('file').addEventListener('change',async()=>{
-  const id=++uploadId,f=$('file').files[0];rows=[];weeks=[];currentData=null;
+  const id=++uploadId,f=$('file').files[0];rows=[];weeks=[];sheet=null;currentData=null;$('columnPicker').hidden=true;
   $('week').disabled=true;$('week').innerHTML='<option value="">엑셀을 읽는 중입니다…</option>';$('weekStatus').textContent='';update();
   if(!f){$('week').innerHTML='<option value="">먼저 엑셀을 업로드해주세요</option>';return;}
   $('fileName').textContent=f.name;
@@ -248,8 +279,7 @@ $('file').addEventListener('change',async()=>{
     if(!workbook.Sheets['종합']) throw new Error('「종합」 시트를 찾지 못했습니다.');
     const stamp=f.name.match(/(?:^|\D)(\d{2})(0[1-9]|1[0-2])([0-2]\d|3[01])(?=\D|$)/);
     sourceDate=stamp?new Date(2000+Number(stamp[1]),Number(stamp[2])-1,Number(stamp[3])):new Date(f.lastModified);
-    rows=IDF.parseRows(workbook.Sheets['종합'],XLSX);weeks=[...new Set(rows.map(r=>r.week))];
-    $('week').innerHTML=weeks.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');$('week').disabled=false;update();
+    sheet=workbook.Sheets['종합'];showColumns(sheet);readColumns();
   }catch(e){if(id!==uploadId)return;rows=[];weeks=[];$('week').innerHTML='<option value="">엑셀 파일을 다시 선택해주세요</option>';update();$('error').textContent=e.message||String(e);}
 });
 let saving=false;

@@ -16,6 +16,15 @@ assert.equal(result.special[2].sale,6000);
 assert.equal(context.IDF.weekDate('10월 4주차 (10/21)',new Date(2026,9,19)),'26.10.21');
 assert.equal(context.IDF.weekDate('1월 1주차 (1/6)',new Date(2026,11,30)),'27.01.06');
 assert.throws(()=>context.IDF.weekDate('10월 4주차',new Date(2026,9,19)),/날짜/);
+const matrix=[['주차','택가',null,null,'품번','브랜드','하루특가'],['10월 4주차\n(10/21)'],[null,10000,null,null,'AA01','T',8000]];
+const fakeXLSX={utils:{decode_range:()=>({e:{r:2,c:6}}),sheet_to_json:()=>matrix}};
+const mapped=context.IDF.parseRows({'!ref':'A1:G3'},fakeXLSX,{week:0,code:4,brand:5,tag:1,sale:6});
+assert.equal(mapped.length,1);
+assert.equal(mapped[0].week,'10월 4주차 (10/21)');
+assert.equal(mapped[0].code,'AA01');
+assert.equal(mapped[0].brand,'LIST');
+assert.equal(mapped[0].excelRow,3);
+assert.throws(()=>context.IDF.parseRows({'!ref':'A1:G3'},fakeXLSX,{week:0,code:4,brand:5,tag:1,sale:1}),/서로 다른 열/);
 
 const literal=html.match(/const JSX_LOGIC\s*=\s*("(?:\\.|[^"\\])*")\s*;/)?.[1];
 assert.ok(literal);
