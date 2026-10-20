@@ -24,4 +24,6 @@ new vm.Script(jsx);
 assert.doesNotMatch(jsx,/pop_A5|popOperations|popSummary/);
 assert.match(jsx,/function dateText\(/);
 assert.match(jsx,/kind:'date'/);
+assert.match(jsx,/placedLayerEditContents/);
+assert.doesNotMatch(jsx,/placedLayerReplaceContents|placedLayerExportContents/);
 console.log('JSX generator smoke checks passed');
