@@ -24,6 +24,9 @@
   .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
   #columnPicker[hidden]{display:none}
   #columnPicker select{display:block;width:100%;margin-top:6px}
+  #manualDateLabel{display:block;margin-top:12px}
+  #manualDateLabel[hidden]{display:none}
+  #manualDate{display:block;width:100%;height:42px;margin-top:6px;border:1px solid var(--border2);border-radius:8px;background:var(--s3);color:var(--text)}
   .special-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
   .special{border:1px solid var(--line);border-radius:14px;padding:16px}
   label{display:block;font-size:12px;font-weight:700;margin:12px 0 7px}
@@ -80,10 +83,9 @@ button,input,select,textarea{font-family:inherit}input,select,textarea{color-sch
     <div id="columnPicker" class="grid" hidden style="margin-top:16px">
       <label>주차 열<select id="colWeek"></select></label>
       <label>품번 열<select id="colCode"></select></label>
-      <label>브랜드 열<select id="colBrand"></select></label>
       <label>택가 열<select id="colTag"></select></label>
       <label>하루특가 열<select id="colSale"></select></label>
-      <div class="hint">열을 바꾸면 상품 목록을 다시 읽습니다.</div>
+      <div class="hint">주차가 없으면 「없음」을 고르세요. 브랜드는 품번 첫 글자 S·T·A로 판단합니다. 열을 바꾸면 상품 목록을 다시 읽습니다.</div>
     </div>
   </section>
 
@@ -91,6 +93,7 @@ button,input,select,textarea{font-family:inherit}input,select,textarea{color-sch
     <div class="step">02 / WEEK</div>
     <div class="title">실행할 주차</div>
     <label for="week">월 · 주차</label><select id="week" disabled><option>먼저 엑셀을 업로드해주세요</option></select>
+    <label id="manualDateLabel" for="manualDate" hidden>PSD 날짜 직접 입력<input id="manualDate" type="date"><span class="hint">입력한 날짜가 date 레이어에 26.10.21 형식으로 들어갑니다.</span></label>
     <div id="weekStatus" class="hint"></div>
   </section>
 
@@ -98,7 +101,7 @@ button,input,select,textarea{font-family:inherit}input,select,textarea{color-sch
     <div class="step">03 / SPECIAL</div>
     <div class="title">특가 3개 품번</div>
     <div class="special-grid" id="specialGrid"></div>
-    <div class="hint">선택한 주차와 위에서 고른 「종합」 시트 열에서 가격을 찾습니다. 셋업은 두 품번의 택가·하루특가를 합산합니다. 할인율은 기존 JSX 기준으로 소수점 이하를 버립니다.</div>
+    <div class="hint">위에서 고른 「종합」 시트 열에서 가격을 찾습니다. 셋업은 두 품번의 택가·하루특가를 합산합니다. 할인율은 기존 JSX 기준으로 소수점 이하를 버립니다.</div>
   </section>
 
   <section class="card">
@@ -142,27 +145,29 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
 (function(root){
   const norm = value => String(value ?? '').trim().toUpperCase();
   const pct = (tag,sale) => Math.floor((tag-sale)*100/tag);
-  function parseRows(ws, XLSX, columns={week:1,code:2,brand:3,tag:8,sale:13}){
+  const NO_WEEK='주차 없음';
+  function parseRows(ws, XLSX, columns={week:1,code:2,tag:8,sale:13}){
     if(!ws || !ws['!ref']) throw new Error('「종합」 시트에 데이터가 없습니다.');
-    if(new Set(Object.values(columns)).size!==5) throw new Error('주차·품번·브랜드·택가·하루특가는 서로 다른 열을 선택해주세요.');
+    const chosen=Object.values(columns).filter(c=>c!==null);
+    if(new Set(chosen).size!==chosen.length) throw new Error('주차·품번·택가·하루특가는 서로 다른 열을 선택해주세요.');
     // Keep physical Excel columns and row numbers even when !ref starts at B2.
     const range={s:{r:0,c:0},e:XLSX.utils.decode_range(ws['!ref']).e};
     const matrix=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,range});
-    let week='', out=[];
+    let week=columns.week===null?NO_WEEK:'', out=[];
     matrix.forEach((r,index)=>{
-      const label=String(r[columns.week]??'').replace(/\s+/g,' ').trim();
+      const label=String(columns.week===null?'':r[columns.week]??'').replace(/\s+/g,' ').trim();
       if(/\d+\s*월\s*\d+\s*주차/.test(label)) week=label;
       const code=norm(r[columns.code]);
-      if(!week || !code || code==='품번') return;
+      if(!week || !/^[STA][A-Z0-9]{5,}$/.test(code)) return;
       const number=v=>v===null || String(v).trim()==='' ? NaN : Number(String(v).replace(/[,\s원]/g,''));
       const tag=number(r[columns.tag]),sale=number(r[columns.sale]);
-      const brand=({S:'SHESMISS',T:'LIST',A:'SISTINA'})[norm(r[columns.brand])];
+      const brand=({S:'SHESMISS',T:'LIST',A:'SISTINA'})[code[0]];
       let error='';
       if(!Number.isSafeInteger(tag)||!Number.isSafeInteger(sale)||tag<=0||sale<0||sale>tag) error='택가 또는 하루특가가 잘못되었거나 비어 있습니다';
       if(!brand) error='지원하지 않는 브랜드입니다';
       out.push({week,code,brand,tag,sale,percent:error?null:pct(tag,sale),excelRow:index+1,error});
     });
-    if(!out.length) throw new Error('월·주차와 상품을 찾지 못했습니다. 「종합」 시트를 확인해주세요.');
+    if(!out.length) throw new Error('상품을 찾지 못했습니다. 「종합」 시트와 선택한 열을 확인해주세요.');
     return out;
   }
   function special(rows,codes){
@@ -202,7 +207,13 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     const d=dates[0],pad=n=>String(n).padStart(2,'0');
     return pad(d.getFullYear()%100)+'.'+pad(month)+'.'+pad(day);
   }
-  const api={parseRows,special,makeData,weekDate};
+  function manualDate(value){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value))throw new Error('PSD 날짜를 직접 입력해주세요.');
+    const [year,month,day]=value.split('-').map(Number),check=new Date(year,month-1,day);
+    if(check.getFullYear()!==year||check.getMonth()+1!==month||check.getDate()!==day)throw new Error('올바른 날짜를 입력해주세요.');
+    return String(year%100).padStart(2,'0')+'.'+String(month).padStart(2,'0')+'.'+String(day).padStart(2,'0');
+  }
+  const api={parseRows,special,makeData,weekDate,manualDate,NO_WEEK};
   if(typeof module!=='undefined') module.exports=api; else root.IDF=api;
 })(globalThis);
 
@@ -216,8 +227,11 @@ const $=id=>document.getElementById(id);
 const money=n=>n.toLocaleString('ko-KR')+'원';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let rows=[],weeks=[],sheet=null,uploadId=0,currentData=null,sourceDate=new Date();
-const columnFields=[['Week',1],['Code',2],['Brand',3],['Tag',8],['Sale',13]];
-function chosenColumns(){return Object.fromEntries(columnFields.map(([name])=>[name.toLowerCase(),Number($('col'+name).value)]));}
+const columnFields=[['Week',1],['Code',2],['Tag',8],['Sale',13]];
+function chosenColumns(){return Object.fromEntries(columnFields.map(([name])=>[name.toLowerCase(),$('col'+name).value===''?null:Number($('col'+name).value)]));}
+function dateForWeek(week){
+  return week===IDF.NO_WEEK?IDF.manualDate($('manualDate').value):IDF.weekDate(week,sourceDate);
+}
 function readColumns(){
   const previous=$('week').value;rows=[];weeks=[];$('week').disabled=true;$('generate').disabled=true;
   try{
@@ -234,7 +248,7 @@ function showColumns(ws){
     const sample=top.map(row=>row[c]).find(v=>v!=null&&String(v).trim());
     return `<option value="${c}">${XLSX.utils.encode_col(c)}${sample?' · '+esc(String(sample).slice(0,20)):''}</option>`;
   }).join('');
-  for(const [name,defaultColumn] of columnFields){$('col'+name).innerHTML=options;$('col'+name).value=String(defaultColumn);}
+  for(const [name,defaultColumn] of columnFields){$('col'+name).innerHTML=(name==='Week'?'<option value="">없음 (날짜 직접 입력)</option>':'')+options;$('col'+name).value=String(defaultColumn);}
   $('columnPicker').hidden=false;
 }
 for(const [name] of columnFields)$('col'+name).addEventListener('change',readColumns);
@@ -251,20 +265,22 @@ function groups(){return [1,2,3].map(i=>document.querySelector(`[name="type${i}"
 function update(){
   currentData=null;$('generate').disabled=true;$('error').textContent='';
   const week=$('week').value,selected=rows.filter(r=>r.week===week);
+  $('manualDateLabel').hidden=week!==IDF.NO_WEEK;
   if(!selected.length){$('summary').textContent='엑셀과 주차를 먼저 선택해주세요.';$('products').textContent='';dl.innerHTML='';grid.querySelectorAll('.lookup').forEach(el=>el.textContent='엑셀과 주차를 먼저 선택해주세요.');return;}
   dl.innerHTML=selected.map(r=>`<option value="${esc(r.code)}">${esc(r.brand)} · ${money(r.sale)}</option>`).join('');
   const pages=Math.ceil(selected.length/6),hidden=4-pages;
   $('weekStatus').textContent=`${weeks.length}개 주차 인식 · 선택한 주차 ${selected.length}개 상품`;
-  $('summary').innerHTML=`<strong>${esc(week)}</strong><br>일반 상품 <b>${selected.length}개</b> · 일반 상품 대지 <b>${pages}쌍</b> 표시 (A4 + 인스타)<br><span class="hint">남은 일반 상품 대지 ${Math.max(0,hidden)}쌍 숨김 · 마지막 대지 빈 칸 ${(6-selected.length%6)%6}개 숨김 · 특가에 선택한 품번도 일반 상품 목록에 유지됩니다.</span><br>특가 상세 <b>3개</b> · A4·인스타에 반영`;
+  $('summary').innerHTML=`<strong>${esc(week)}</strong><br>일반 상품 <b>${selected.length}개</b> · ${selected.length>24?'현재 PSD는 최대 24개까지 지원합니다.':`일반 상품 대지 <b>${pages}쌍</b> 표시 (A4 + 인스타)<br><span class="hint">남은 일반 상품 대지 ${Math.max(0,hidden)}쌍 숨김 · 마지막 대지 빈 칸 ${(6-selected.length%6)%6}개 숨김 · 특가에 선택한 품번도 일반 상품 목록에 유지됩니다.</span>`}<br>특가 상세 <b>3개</b> · A4·인스타에 반영`;
   const codes=groups();
   [...grid.children].forEach((box,i)=>{
     try{const s=IDF.special(selected,codes[i]);box.querySelector('.lookup').innerHTML=`${esc(s.brand)}${s.codes.length===2?' · 셋업 합계':''}<br><s>${money(s.tag)}</s> → <strong>${money(s.sale)}</strong><br>할인율 ${s.percent}% · 특가 상세 ${i+1} 연동<br>엑셀 ${s.excelRows.join(', ')}행`;}
     catch(e){box.querySelector('.lookup').textContent=e.message;}
   });
   $('products').innerHTML='<table style="width:100%;border-collapse:collapse;white-space:nowrap;font-size:14px;text-align:left"><thead><tr><th>대지 / 칸</th><th>품번</th><th>브랜드</th><th>택가</th><th>하루특가</th><th>엑셀 행</th></tr></thead><tbody>'+selected.map((r,i)=>`<tr><td>${Math.floor(i/6)+1} / ${i%6+1}</td><td>${esc(r.code)}</td><td>${esc(r.brand)}</td><td>${money(r.tag)}</td><td>${money(r.sale)}</td><td>${r.excelRow}${r.error?' · '+esc(r.error):''}</td></tr>`).join('')+'</tbody></table>';
-  try{const date=IDF.weekDate(week,sourceDate);currentData=IDF.makeData(rows,week,codes);$('weekStatus').textContent+=' · PSD 날짜 '+date;$('generate').disabled=false;}catch(e){$('error').textContent=e.message;}
+  try{const date=dateForWeek(week);currentData=IDF.makeData(rows,week,codes);$('weekStatus').textContent+=' · PSD 날짜 '+date;$('generate').disabled=false;}catch(e){$('error').textContent=e.message;}
 }
 $('week').addEventListener('change',update);
+$('manualDate').addEventListener('input',update);
 $('file').addEventListener('change',async()=>{
   const id=++uploadId,f=$('file').files[0];rows=[];weeks=[];sheet=null;currentData=null;$('columnPicker').hidden=true;
   $('week').disabled=true;$('week').innerHTML='<option value="">엑셀을 읽는 중입니다…</option>';$('weekStatus').textContent='';update();
@@ -292,8 +308,8 @@ $('generate').addEventListener('click',async()=>{
     const outputPath=$('outputPath').value.trim().replace(/^"|"$/g,'');
     if(!outputPath){$('outputPath').focus();throw new Error('출력 폴더 경로를 입력해주세요.');}
     const data=IDF.makeData(rows,$('week').value,groups());
-    data.date=IDF.weekDate(data.week,sourceDate);
-    const key=data.week.replace(/[^0-9가-힣]+/g,'_').replace(/_+$/,'');
+    data.date=dateForWeek(data.week);
+    const key=data.week===IDF.NO_WEEK?data.date.replace(/\./g,''):data.week.replace(/[^0-9가-힣]+/g,'_').replace(/_+$/,'');
     const logic=JSX_LOGIC.replaceAll('20260916',key).replaceAll('2026-09-16',data.week);
     const payload=JSON.stringify(data).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
     const text='#target photoshop\n/* Generated from uploaded Excel. */\nvar IDF_ALL_DATA = '+payload+';\nvar IDF_OUTPUT_DIR = '+JSON.stringify(outputPath).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'))+';\n'+logic;
