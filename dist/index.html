@@ -233,13 +233,18 @@ function dateForWeek(week){
   return week===IDF.NO_WEEK?IDF.manualDate($('manualDate').value):IDF.weekDate(week,sourceDate);
 }
 function readColumns(){
-  const previous=$('week').value;rows=[];weeks=[];$('week').disabled=true;$('generate').disabled=true;
+  const previous=$('week').value,withoutWeek=$('colWeek').value==='';rows=[];weeks=[];$('week').disabled=true;$('generate').disabled=true;
   try{
     rows=IDF.parseRows(sheet,XLSX,chosenColumns());weeks=[...new Set(rows.map(r=>r.week))];
     $('week').innerHTML=weeks.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
     if(weeks.includes(previous))$('week').value=previous;
     $('week').disabled=false;update();
-  }catch(e){$('week').innerHTML='<option value="">열을 다시 선택해주세요</option>';update();$('error').textContent=e.message||String(e);}
+  }catch(e){
+    $('week').innerHTML=withoutWeek?`<option value="${IDF.NO_WEEK}">${IDF.NO_WEEK}</option>`:'<option value="">열을 다시 선택해주세요</option>';
+    $('week').disabled=!withoutWeek;update();
+    $('weekStatus').textContent=withoutWeek?'품번·택가·하루특가 열을 확인해주세요.':'';
+    $('error').textContent=e.message||String(e);
+  }
 }
 function showColumns(ws){
   const end=Math.min(100,Math.max(13,XLSX.utils.decode_range(ws['!ref']).e.c));
