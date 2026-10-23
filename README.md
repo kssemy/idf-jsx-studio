@@ -1,4 +1,4 @@
-# IDF STUDIO JSX 생성기
+# 팩토리아울렛 수요특가 자동화 JSX
 
 생성기: https://kssemy.github.io/idf-jsx-studio/
 
